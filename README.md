@@ -2,13 +2,6 @@
 
 This is a reusable Jenkins shared library for updating and triggering Gremlin chaos engineering scenarios via REST API.
 
-## Usage
-
-Add this library in Jenkins under **Manage Jenkins > Configure Global Pipeline Libraries**:
-
-- **Name**: gremlin-shared-lib
-- **Default Version**: `main` (or whatever branch you use)
-- **Project Repository**: GitHub repo URL
 
 ### Sample Usage in Jenkinsfile
 
