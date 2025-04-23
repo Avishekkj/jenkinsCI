@@ -1,0 +1,148 @@
+pipeline {
+  agent any
+
+  environment {
+    GREMLIN_API_KEY = credentials('gremlinkey')
+    GREMLIN_TEAM_ID = credentials('gremlinteamid')
+  }
+
+  stages {
+    stage('Run Gremlin Chaos Scenario') {
+      steps {
+        script {
+          def scenarioUrl = "https://api.gremlin.com/v1/scenarios/3ae9d27b-b0fa-470b-a9d2-7bb0fa970bd2/runs?teamId=${GREMLIN_TEAM_ID}"
+
+          def jsonData = '''{
+            "name": "ec2instnce_Stress",
+            "graph": {
+              "nodes": {
+                "0": {
+                  "target_definition": {
+                    "containerSelection": {
+                      "selectionType": "ANY"
+                    },
+                    "strategy_type": "Random",
+                    "target_type": "Host",
+                    "strategy": {
+                      "percentage": 100,
+                      "attrs": {
+                        "multiSelectTags": {
+                          "zone": ["ap-southeast-2c"]
+                        }
+                      },
+                      "multi_select_tags": {
+                        "zone": ["ap-southeast-2c"]
+                      },
+                      "type": "RandomPercent"
+                    }
+                  },
+                  "attack_configuration": {
+                    "command": {
+                      "infraCommandType": "disk",
+                      "infraCommandArgs": {
+                        "directory": "/tmp/gremlin",
+                        "workers": 4,
+                        "block_size": 4,
+                        "percent": 30,
+                        "type": "disk",
+                        "length": 60,
+                        "cli_args": [
+                          "disk", "-d", "/tmp/gremlin", "-w", "4", "-b", "4", "-p", "30", "--length", "60"
+                        ]
+                      }
+                    },
+                    "targets": [{
+                      "targetingStrategy": {
+                        "type": "Host",
+                        "multiSelectTags": {
+                          "zone": ["ap-southeast-2c"]
+                        }
+                      }
+                    }],
+                    "sampling": {
+                      "type": "Even",
+                      "percent": 100
+                    }
+                  },
+                  "include_new_targets": true,
+                  "type": "InfraAttack",
+                  "id": 0,
+                  "next": 1,
+                  "state": {
+                    "lifecycle": "NotStarted"
+                  },
+                  "guid": "0bdd248e-f403-47af-ac38-20b39f71dbcb"
+                },
+                "1": {
+                  "target_definition": {
+                    "containerSelection": {
+                      "selectionType": "ANY"
+                    },
+                    "strategy_type": "Random",
+                    "target_type": "Host",
+                    "strategy": {
+                      "percentage": 100,
+                      "attrs": {
+                        "multiSelectTags": {
+                          "zone": ["ap-southeast-2c"]
+                        }
+                      },
+                      "multi_select_tags": {
+                        "zone": ["ap-southeast-2c"]
+                      },
+                      "type": "RandomPercent"
+                    }
+                  },
+                  "attack_configuration": {
+                    "command": {
+                      "infraCommandType": "memory",
+                      "infraCommandArgs": {
+                        "percent": 50,
+                        "allocation_strategy": "total",
+                        "type": "memory",
+                        "length": 60,
+                        "cli_args": [
+                          "memory", "--length", "60", "-p", "50", "-s", "total"
+                        ]
+                      }
+                    },
+                    "targets": [{
+                      "targetingStrategy": {
+                        "type": "Host",
+                        "multiSelectTags": {
+                          "zone": ["ap-southeast-2c"]
+                        }
+                      }
+                    }],
+                    "sampling": {
+                      "type": "Even",
+                      "percent": 100
+                    }
+                  },
+                  "include_new_targets": true,
+                  "type": "InfraAttack",
+                  "id": 1,
+                  "state": {
+                    "lifecycle": "NotStarted"
+                  },
+                  "guid": "dd248ef4-0377-4fec-b820-b39f71dbcbdc"
+                }
+              },
+              "start_id": "0"
+            }
+          }'''
+
+          writeFile file: 'gremlin_scenario.json', text: jsonData
+
+          sh """
+            curl -i -X POST '${scenarioUrl}' \
+              -H 'Content-Type: application/json' \
+              -H 'Authorization: Key ${GREMLIN_API_KEY}' \
+              -d @gremlin_scenario.json
+          """
+        }
+      }
+    }
+  }
+}
+

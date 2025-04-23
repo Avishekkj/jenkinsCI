@@ -1,0 +1,173 @@
+def sendSlackNotification(String message, String status) {
+    def color = status == 'SUCCESS' ? '#36a64f' : '#ff0000'
+    def payload = """{
+        "attachments": [{
+            "color": "${color}",
+            "text": "${message}"
+        }]
+    }"""
+
+    withCredentials([string(credentialsId: 'slackWebhookURL', variable: 'SLACK_WEBHOOK')]) {
+        sh """
+        curl -X POST -H 'Content-type: application/json' --data '${payload}' $SLACK_WEBHOOK
+        """
+    }
+}
+
+
+
+
+
+pipeline {
+    agent any
+    environment {
+        GREMLIN_API_KEY = credentials('gremlinkey')
+        GREMLIN_TEAM_ID = credentials('gremlinteamid')
+    }
+    parameters {
+        string(name: 'HOSTNAME', defaultValue: 'ip-172-31-30-238.ap-southeast-2.compute.internal', description: 'Target host local hostname')
+        string(name: 'RDS_ENDPOINT', defaultValue: 'maraigremlin.cvwyoskgmxtl.ap-southeast-2.rds.amazonaws.com', description: 'RDS endpoint to blackhole')
+        string(name: 'PORT', defaultValue: '3306', description: 'Port number to blackhole')
+        string(name: 'EXCLUDE_PORT_PATTERN', defaultValue: '^53', description: 'Port pattern to exclude')
+        string(name: 'DURATION', defaultValue: '30', description: 'Duration of the attack in seconds')
+    }
+    stages {
+        stage('Validate Inputs') {
+            steps {
+                script {
+                    // Validate HOSTNAME (basic check for internal DNS)
+                    if (!params.HOSTNAME.matches(/^ip-[0-9\-]+\.ap-southeast-2\.compute\.internal$/)) {
+                        error "Invalid HOSTNAME: ${params.HOSTNAME}"
+                    }
+
+                    // Validate RDS_ENDPOINT (basic DNS pattern check)
+                    if (!params.RDS_ENDPOINT.matches(/^([a-zA-Z0-9\-]+\.)+ap-southeast-2\.rds\.amazonaws\.com$/)) {
+                        error "Invalid RDS_ENDPOINT: ${params.RDS_ENDPOINT}"
+                    }
+
+                    // Validate PORT
+                    def port = params.PORT as Integer
+                    if (port < 1 || port > 65535) {
+                        error "Invalid PORT: ${params.PORT}. Must be between 1 and 65535"
+                    }
+
+                    // Validate EXCLUDE_PORT_PATTERN
+                    if (!params.EXCLUDE_PORT_PATTERN.matches(/^(\^)?[0-9]{1,5}$/)) {
+                        error "Invalid EXCLUDE_PORT_PATTERN: ${params.EXCLUDE_PORT_PATTERN}. Must be like ^53 or 443"
+                    }
+
+                    // Validate DURATION
+                    def duration = params.DURATION as Integer
+                    if (duration < 30 || duration > 900) {
+                        error "Invalid DURATION: ${duration}. Must be between 30 and 900 seconds"
+                    }
+
+                    echo "✅ All inputs validated successfully"
+                }
+            }
+        }
+stage('Run Gremlin Blackhole Attack') {
+    steps {
+        script {
+            def body = """{
+                "target": {
+                    "type": "Random",
+                    "hosts": {
+                        "multiSelectTags": {
+                            "local-hostname": ["${params.HOSTNAME}"]
+                        }
+                    },
+                    "percent": 100
+                },
+                "command": {
+                    "type": "blackhole",
+                    "commandType": "Blackhole",
+                    "args": [
+                        "-l", "${params.DURATION}",
+                        "-p", "${params.EXCLUDE_PORT_PATTERN}",
+                        "-h", "${params.RDS_ENDPOINT}",
+                        "-n", "${params.PORT}"
+                    ],
+                    "providers": []
+                },
+                "includeNewTargets": true
+            }"""
+
+            def maxRetries = 3
+            def delay = 5
+            def attempt = 1
+            def success = false
+            def response = ""
+
+            withCredentials([
+                string(credentialsId: 'gremlinkey', variable: 'GREMLIN_API_KEY'),
+                string(credentialsId: 'gremlinteamid', variable: 'GREMLIN_TEAM_ID')
+            ]) {
+                while (attempt <= maxRetries && !success) {
+                    echo "🔁 Attempt #${attempt} to trigger Gremlin attack..."
+
+                    response = sh (
+                        script: """
+curl -s -X POST "https://api.gremlin.com/v1/attacks/new?teamId=$GREMLIN_TEAM_ID" \\
+     -H "Content-Type: application/json;charset=utf-8" \\
+     -H "Authorization: Key $GREMLIN_API_KEY" \\
+     -d '${body}'
+""",
+                        returnStdout: true
+                    ).trim()
+
+def uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
+if (response ==~ uuidRegex) {
+    echo "✅ Gremlin attack triggered! Attack ID: ${response}"
+    success = true
+} else {
+    try {
+        def json = new groovy.json.JsonSlurper().parseText(response)
+        if (json?.attackId || json?.status == 'ALREADY_RUNNING') {
+            echo "✅ Gremlin attack triggered or already running!"
+            success = true
+        } else {
+            echo "⚠️ Unexpected JSON response: ${response}"
+        }
+    } catch (Exception e) {
+        echo "❌ Failed to parse response as JSON: ${e.message}"
+        echo "🔹 Raw response: ${response}"
+    }
+}
+
+
+                    if (!success) {
+                        echo "⏳ Retrying in ${delay} seconds..."
+                        sleep delay
+                        delay *= 2
+                        attempt++
+                    }
+                }
+
+                if (!success) {
+                    echo "❌ Failed to trigger Gremlin attack after ${maxRetries} attempts."
+                    echo "📝 Last response: ${response}"
+                }
+            }
+        }
+    }
+}
+
+
+}
+
+post {
+    success {
+        script {
+            sendSlackNotification("✅ Jenkins pipeline succeeded: ${env.JOB_NAME} #${env.BUILD_NUMBER}", 'SUCCESS')
+        }
+    }
+    failure {
+        script {
+            sendSlackNotification("❌ Jenkins pipeline failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}", 'FAILURE')
+        }
+    }
+}
+
+}
