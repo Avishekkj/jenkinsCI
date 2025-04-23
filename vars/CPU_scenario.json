@@ -1,0 +1,16 @@
+{
+  "name": "My Gremlin CPU Stress Scenario",
+  "description": "Test CPU stress using Gremlin",
+  "execution": {
+    "type": "immediate"
+  },
+  "target": {
+    "type": "Random",
+    "percentage": 50
+  },
+  "attack": {
+    "type": "cpu",
+    "length": 60,
+    "cores": 2
+  }
+}
